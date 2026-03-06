@@ -1,3 +1,5 @@
+#include "handmade.h"
+
 #include <windows.h>
 #include <stdint.h>
 #include <Xinput.h>
@@ -6,39 +8,10 @@
 
 WNDPROC Wndproc;
 
-#define internal static
-#define local_persist static
-#define global_variable static
-#define Pi32 3.14159265359
+#include "handmade.cpp"
+#include "win32_handmade.h"
 
-typedef uint8_t uint8;
-typedef uint16_t uint16;
-typedef uint32_t uint32;
-
-typedef int8_t int8;
-typedef int16_t int16;
-typedef int32_t int32;
-
-typedef float float32;
-typedef double float64;
-
-typedef int32 bool32;
-
-struct win32_window_dimensions
-{
-    int Width;
-    int Height;
-};
-
-struct win32_offscreen_buffer
-{
-    BITMAPINFO Info;
-    void *Memory;
-    int Width;
-    int Height;
-    int Pitch;
-    int BytesPerPixel;
-};
+#define ArrayCount(Array) (sizeof(Array) / sizeof((Array)[0]))
 
 // win InputGetState dynamic definition
 #define X_INPUT_GET_STATE(name) DWORD WINAPI name(DWORD dwUserIndex, XINPUT_STATE *pState)
@@ -92,25 +65,6 @@ win32_window_dimensions Win32GetWindowDimensions(HWND Window)
     Result.Width = ClientRect.right - ClientRect.left;
     Result.Height = ClientRect.bottom - ClientRect.top;
     return (Result);
-}
-
-internal void
-RenderWeirdGradient(win32_offscreen_buffer *Buffer, int xOffset, int yOffset)
-{
-    uint8 *Row = (uint8 *)Buffer->Memory;
-    for (int Y = 0; Y < Buffer->Height; ++Y)
-    {
-        uint32 *Pixel = (uint32 *)Row;
-        for (int X = 0; X < Buffer->Width; ++X)
-        {
-            uint8 Blue = X + xOffset;
-            uint8 Green = Y + yOffset;
-            uint8 Red = 255;
-            *Pixel++ = ((Red << 16) | (Green << 8) | Blue);
-        }
-
-        Row += Buffer->Pitch;
-    }
 }
 
 internal void Win32ResizeDIBSection(win32_offscreen_buffer *Buffer, int Width, int Height)
@@ -368,6 +322,12 @@ internal void Win32FillSoundBuffer(win32_sound_output *SoundOutput, DWORD ByteTo
     SecondaryBuffer->Unlock(Region1, Region1Size, Region2, Region2Size);
 }
 
+internal void Win32ProcessXInputDigitalButton(DWORD XInputButtonState, DWORD ButtonBit, game_button_state *NewState, game_button_state *OldState)
+{
+    NewState->EndedDown = ((XInputButtonState & ButtonBit) == ButtonBit);
+    NewState->HalfTransitionCount = (OldState->EndedDown != NewState->EndedDown) ? 1 : 0;
+}
+
 int CALLBACK
 WinMain(
     HINSTANCE instance,
@@ -411,6 +371,22 @@ WinMain(
 
     Running = true;
 
+#if HANDMADE_INTERNAL
+    LPVOID BaseAdress = (LPVOID)Terabytes((uint64)2);
+#else
+    LPVOID BaseAdress = 0;
+#endif
+
+    game_memory GameMemory = {};
+    GameMemory.PermanentStorageSize = Megabytes(64);
+    GameMemory.TransientStorageSize = Gigabytes((uint64)4);
+
+    uint64 TotalSize = GameMemory.PermanentStorageSize + GameMemory.TransientStorageSize;
+
+    GameMemory.PermanentStorage = VirtualAlloc(BaseAdress, TotalSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+
+    GameMemory.TransientStorage = (uint8 *)GameMemory.PermanentStorage + GameMemory.PermanentStorageSize;
+
     // graphics
     int xOffset = 0;
     int yOffset = 0;
@@ -428,10 +404,21 @@ WinMain(
     Win32InitDSound(Window, SoundOutput.SamplesPerSecond, SoundOutput.SecondaryBufferSize);
     Win32FillSoundBuffer(&SoundOutput, 0, SoundOutput.SecondaryBufferSize);
 
-    SecondaryBuffer->Play(0, 0, DSBPLAY_LOOPING);
+    LARGE_INTEGER LastCounter;
+    QueryPerformanceCounter(&LastCounter);
+
+    LARGE_INTEGER PeformanceFrequencyResult;
+    QueryPerformanceFrequency(&PeformanceFrequencyResult);
+    int64 PeformanceFrequency = PeformanceFrequencyResult.QuadPart;
+
+    // SecondaryBuffer->Play(0, 0, DSBPLAY_LOOPING);
+    game_input Input[2] = {};
+    game_input *NewInput = &Input[1];
+    game_input *OldInput = &Input[2];
 
     while (Running)
     {
+
         MSG Message;
         while (PeekMessage(&Message, 0, 0, 0, PM_REMOVE))
         {
@@ -444,8 +431,18 @@ WinMain(
             DispatchMessage(&Message);
         }
 
-        for (DWORD ControllerIndex = 0; ControllerIndex < XUSER_MAX_COUNT; ControllerIndex++)
+        int MaxControllerCount = XUSER_MAX_COUNT;
+        int MaxSupportedController = ArrayCount(NewInput->Controllers);
+        if (MaxControllerCount > MaxSupportedController)
         {
+            MaxControllerCount = MaxSupportedController;
+        }
+
+        for (DWORD ControllerIndex = 0; ControllerIndex < MaxControllerCount; ControllerIndex++)
+        {
+            game_controller_input *NewController = &NewInput->Controllers[ControllerIndex];
+            game_controller_input *OldController = &OldInput->Controllers[ControllerIndex];
+
             XINPUT_STATE ControllerState;
             if (DyXInputGetState(ControllerIndex, &ControllerState) != ERROR_SUCCESS)
             {
@@ -463,19 +460,33 @@ WinMain(
             bool Start = (Pad->wButtons & XINPUT_GAMEPAD_START);
             bool Back = (Pad->wButtons & XINPUT_GAMEPAD_BACK);
 
-            bool LeftShoulder = (Pad->wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER);
-            bool RightShoulder = (Pad->wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER);
+            Win32ProcessXInputDigitalButton(Pad->wButtons, XINPUT_GAMEPAD_LEFT_SHOULDER,
+                                            &NewController->LeftShoulder, &OldController->LeftShoulder);
+            Win32ProcessXInputDigitalButton(Pad->wButtons, XINPUT_GAMEPAD_RIGHT_SHOULDER,
+                                            &NewController->RightShoulder, &OldController->RightShoulder);
 
-            bool AButton = (Pad->wButtons & XINPUT_GAMEPAD_A);
-            bool BButton = (Pad->wButtons & XINPUT_GAMEPAD_B);
-            bool CButton = (Pad->wButtons & XINPUT_GAMEPAD_X);
-            bool DButton = (Pad->wButtons & XINPUT_GAMEPAD_Y);
+            Win32ProcessXInputDigitalButton(Pad->wButtons, XINPUT_GAMEPAD_A,
+                                            &NewController->Down, &OldController->Down);
+            Win32ProcessXInputDigitalButton(Pad->wButtons, XINPUT_GAMEPAD_Y,
+                                            &NewController->Up, &OldController->Up);
+            Win32ProcessXInputDigitalButton(Pad->wButtons, XINPUT_GAMEPAD_X,
+                                            &NewController->Left, &OldController->Left);
+            Win32ProcessXInputDigitalButton(Pad->wButtons, XINPUT_GAMEPAD_B,
+                                            &NewController->Right, &OldController->Right);
 
             int16 StickX = Pad->sThumbLX;
             int16 StickY = Pad->sThumbLY;
         }
 
-        RenderWeirdGradient(&GlobalBlackBuffer, xOffset, yOffset);
+        game_offscreen_buffer ScreenBuffer = {};
+        ScreenBuffer.Memory = GlobalBlackBuffer.Memory;
+        ScreenBuffer.Width = GlobalBlackBuffer.Width;
+        ScreenBuffer.Height = GlobalBlackBuffer.Height;
+        ScreenBuffer.Pitch = GlobalBlackBuffer.Pitch;
+
+        // Game handler!
+        GameUpdateHandler(&GameMemory, NewInput, &ScreenBuffer);
+        // &GlobalBlackBuffer, xOffset, yOffset
 
         // Make sure sound work.
         DWORD PlayCursor;
@@ -508,10 +519,26 @@ WinMain(
                                    Dimensions.Width, Dimensions.Height,
                                    0, 0,
                                    Dimensions.Width, Dimensions.Height);
+
         ReleaseDC(Window, 0);
 
         ++xOffset;
         ++yOffset;
+
+        LARGE_INTEGER EndCounter;
+        QueryPerformanceCounter(&EndCounter);
+        int64 CounterEllapsed = EndCounter.QuadPart - LastCounter.QuadPart;
+        int32 MilisecondsPerFrame = (int32)((1000 * CounterEllapsed) / PeformanceFrequency);
+        int32 FPS = PeformanceFrequency / CounterEllapsed;
+
+        char Buffer[256];
+        wsprintfA(Buffer, "Miliseconds/Frame: %dms %dFPS \n", MilisecondsPerFrame, FPS);
+        OutputDebugStringA(Buffer);
+        LastCounter = EndCounter;
+
+        game_input *Temp = NewInput;
+        NewInput = OldInput;
+        OldInput = Temp;
     }
 
     return (0);
