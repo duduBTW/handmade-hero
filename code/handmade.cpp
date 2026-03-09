@@ -28,6 +28,13 @@ void GameUpdateHandler(game_memory *Memory, game_input *Input, game_offscreen_bu
     Memory->IsInitialized = true;
   }
 
+  debug_read_file_result File = DEBUGPlatformReadEntireFile(__FILE__);
+  if (File.Contents)
+  {
+    DEBUGPlatformWriteEntireFile("W:/handmade/data/test.out", File.ContentSize, File.Contents);
+    DEBUGPlatformFreeFileMemory(File.Contents);
+  }
+
   RenderWeirdGradient(Buffer, GameState->BlueOffset, GameState->GreenOffset);
 
   GameState->BlueOffset++;

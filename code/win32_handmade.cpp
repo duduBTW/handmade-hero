@@ -39,6 +39,78 @@ global_variable bool Running;
 global_variable win32_offscreen_buffer GlobalBlackBuffer;
 global_variable LPDIRECTSOUNDBUFFER SecondaryBuffer;
 
+internal debug_read_file_result DEBUGPlatformReadEntireFile(char *FileName)
+{
+    debug_read_file_result Result = {};
+    HANDLE FileHandle = CreateFileA(
+        FileName,
+        GENERIC_READ,
+        FILE_SHARE_READ,
+        0,
+        OPEN_EXISTING,
+        0,
+        0);
+    if (FileHandle == INVALID_HANDLE_VALUE)
+    {
+        return Result;
+    }
+
+    LARGE_INTEGER FileSize;
+    if (!GetFileSizeEx(FileHandle, &FileSize))
+    {
+        return Result;
+    }
+
+    uint32 FileSize32 = SafeTruncateUint64(FileSize.QuadPart);
+    Result.ContentSize = FileSize32;
+    Result.Contents = VirtualAlloc(0, FileSize32, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!Result.Contents)
+    {
+        return Result;
+    }
+
+    DWORD BytesRead;
+    if (!ReadFile(FileHandle, Result.Contents, FileSize.QuadPart, &BytesRead, 0) || FileSize32 != BytesRead)
+    {
+        DEBUGPlatformFreeFileMemory(Result.Contents);
+        Result.Contents = 0;
+        Result.ContentSize = 0;
+    }
+
+    CloseHandle(FileHandle);
+
+    return Result;
+}
+internal void DEBUGPlatformFreeFileMemory(void *Memory)
+{
+    VirtualFree(Memory, 0, MEM_RELEASE);
+}
+
+internal bool32 DEBUGPlatformWriteEntireFile(char *FileName, uint32 MemorySize, void *Memory)
+{
+    HANDLE FileHandle = CreateFileA(
+        FileName,
+        GENERIC_WRITE,
+        0,
+        0,
+        CREATE_ALWAYS,
+        0,
+        0);
+    if (FileHandle == INVALID_HANDLE_VALUE)
+    {
+        return 0;
+    }
+
+    DWORD BytesWritten;
+    if (!WriteFile(FileHandle, Memory, MemorySize, &BytesWritten, 0))
+    {
+        return 0;
+    }
+
+    CloseHandle(FileHandle);
+    return (BytesWritten == MemorySize);
+}
+
 internal void
 Win32LoadXInput(void)
 {
