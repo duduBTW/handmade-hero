@@ -69,12 +69,19 @@ struct game_controller_input
   float32 EndX;
   float32 EndY;
 
-  game_button_state Up;
-  game_button_state Down;
-  game_button_state Left;
-  game_button_state Right;
-  game_button_state LeftShoulder;
-  game_button_state RightShoulder;
+  union
+  {
+    game_button_state Buttons[6];
+    struct
+    {
+      game_button_state Up;
+      game_button_state Down;
+      game_button_state Left;
+      game_button_state Right;
+      game_button_state LeftShoulder;
+      game_button_state RightShoulder;
+    };
+  };
 };
 
 struct game_input
@@ -100,7 +107,7 @@ struct game_state
   int GreenOffset;
 };
 
-#if HANDMADE_INTERNAL
+// #if HANDMADE_INTERNAL
 struct debug_read_file_result
 {
   void *Contents;
@@ -110,7 +117,7 @@ debug_read_file_result DEBUGPlatformReadEntireFile(char *FileName);
 void DEBUGPlatformFreeFileMemory(void *Memory);
 
 bool32 DEBUGPlatformWriteEntireFile(char *FileName, uint32 MemorySize, void *Memory);
-#endif
+// #endif
 
 // Helpers
 

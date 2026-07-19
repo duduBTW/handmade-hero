@@ -2,5 +2,5 @@
 
 mkdir ..\build
 pushd ..\build
-cl -DHANDMADE_SLOW=1 -DHANDMADE_INTERNAL=1 -FC -Zi W:\handmade\code\win32_handmade.cpp user32.lib Gdi32.lib
+cl -DHANDMADE_SLOW=1 -DHANDMADE_INTERNAL=1 -FC -Zi W:\handmade\code\win32_handmade.cpp user32.lib Gdi32.lib winmm.lib
 popd

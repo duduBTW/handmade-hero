@@ -1,0 +1,3 @@
+- Audio smaller rate.
+- Audio platform independent layer.
+- Controller stick, maybe need to get a controller to try this out?
